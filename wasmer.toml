@@ -1,7 +1,7 @@
 [package]
-name = "python-hosting"
-version = "0.1.0"
-description = "Python Hosting Platform"
+name = "python-js-hosting"
+version = "1.0.0"
+description = "Python & JavaScript Hosting Platform"
 
 [[command]]
 name = "web"
@@ -16,3 +16,14 @@ abi = "wasi"
 [[fs]]
 source = "uploads"
 destination = "/uploads"
+
+[[fs]]
+source = "templates"
+destination = "/templates"
+
+[[fs]]
+source = "static"
+destination = "/static"
+
+[env]
+PYTHONUNBUFFERED = "1"
