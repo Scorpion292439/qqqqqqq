@@ -1,9 +1,20 @@
 #!/bin/bash
-# Tüm bağımlılıkları yükle
+echo "=========================================="
+echo "📦 BAĞIMLILIKLAR YÜKLENİYOR"
+echo "=========================================="
 
-echo "📦 Python bağımlılıkları yükleniyor..."
+# Pip'i güncelle
 pip install --upgrade pip
-pip install -r requirements.txt
 
-echo "✅ Tüm kütüphaneler yüklendi!"
-echo "📊 Yüklenen paket sayısı: $(pip list | wc -l)"
+# Ana bağımlılıkları yükle
+pip install flask gunicorn psutil dnslib
+
+# requirements.txt varsa yükle
+if [ -f requirements.txt ]; then
+    echo "requirements.txt bulundu, yükleniyor..."
+    pip install -r requirements.txt
+fi
+
+echo "=========================================="
+echo "✅ KURULUM TAMAMLANDI"
+echo "=========================================="
