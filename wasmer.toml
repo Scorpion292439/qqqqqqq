@@ -1,0 +1,18 @@
+[package]
+name = "python-hosting"
+version = "0.1.0"
+description = "Python Hosting Platform"
+
+[[command]]
+name = "web"
+module = "main"
+runner = "https://wasmer.sh/python"
+
+[module]
+name = "main"
+source = "."
+abi = "wasi"
+
+[[fs]]
+source = "uploads"
+destination = "/uploads"
