@@ -1,20 +1,24 @@
 #!/bin/bash
-echo "========================================"
-echo "🚀 Python Hosting Başlatılıyor"
-echo "========================================"
+echo "=========================================="
+echo "🚀 PYTHON & JS HOSTING BAŞLATILIYOR"
+echo "=========================================="
 echo "PORT: $PORT"
 echo "PWD: $(pwd)"
-echo "========================================"
+echo "Python: $(python --version)"
+echo "=========================================="
 
-# Gerekli klasörleri oluştur
+# Klasörleri oluştur
 mkdir -p uploads/projects
 mkdir -p uploads/temp
+mkdir -p templates
+mkdir -p static
 
 # Gunicorn ile başlat
 gunicorn --bind 0.0.0.0:$PORT \
-         --workers 1 \
-         --threads 2 \
+         --workers 2 \
+         --threads 4 \
          --timeout 120 \
          --access-logfile - \
          --error-logfile - \
+         --log-level info \
          server:app
