@@ -9,12 +9,11 @@ import zipfile
 import shutil
 import json
 import uuid
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 
-# ========== FLASK UYGULAMASI ==========
+# ========== FLASK UYGULAMASI - WASMER BUNU GÖRECEK ==========
 app = Flask(__name__)
-app.secret_key = "gizli-anahtar-buraya-gelmiş-geçmiş-en-gizli-anahtar"
 
 # ========== KONFİGÜRASYON ==========
 UPLOAD_FOLDER = 'uploads'
@@ -45,71 +44,13 @@ def get_ip():
 
 HOST_IP = get_ip()
 
-# ========== VERİTABANI BAĞLANTISI (MySQL - Wasmer Edge) ==========
-DB_AVAILABLE = False
-db = None
-
-# Wasmer Edge'in otomatik verdiği environment variable'lar
-DB_HOST = os.environ.get('DB_HOST')
-DB_NAME = os.environ.get('DB_NAME')
-DB_USER = os.environ.get('DB_USERNAME')
-DB_PASSWORD = os.environ.get('DB_PASSWORD')
-DB_PORT = os.environ.get('DB_PORT', '3306')
-
-if DB_HOST and DB_NAME and DB_USER and DB_PASSWORD:
-    try:
-        import pymysql
-        import pymysql.cursors
-        DB_AVAILABLE = True
-        print("✅ MySQL veritabanı bağlantısı kuruldu")
-    except ImportError:
-        print("⚠️ pymysql kurulu değil, veritabanı olmadan çalışıyor")
-        print("   pip install pymysql ile kurabilirsiniz")
-else:
-    print("ℹ️ Veritabanı environment variable'ları bulunamadı, veritabanısız modda çalışıyor")
-
 # ========== WEB SİTESİ SAYFALARI ==========
 @app.route('/')
 def index():
-    """Ana sayfa - web arayüzü"""
+    """Ana sayfa - herkese açık"""
     return render_template('index.html', 
                          host_ip=HOST_IP, 
-                         port=PORT,
-                         db_status=DB_AVAILABLE)
-
-@app.route('/dashboard')
-def dashboard():
-    """Dashboard sayfası"""
-    return render_template('dashboard.html', 
-                         host_ip=HOST_IP, 
                          port=PORT)
-
-@app.route('/projects')
-def projects_page():
-    """Projeler sayfası"""
-    return render_template('projects.html', 
-                         host_ip=HOST_IP, 
-                         port=PORT)
-
-@app.route('/console')
-def console_page():
-    """Konsol sayfası"""
-    return render_template('console.html', 
-                         host_ip=HOST_IP, 
-                         port=PORT)
-
-@app.route('/settings')
-def settings_page():
-    """Ayarlar sayfası"""
-    return render_template('settings.html', 
-                         host_ip=HOST_IP, 
-                         port=PORT)
-
-# ========== STATİK DOSYALAR ==========
-@app.route('/static/<path:path>')
-def static_files(path):
-    """Statik dosyaları serve et"""
-    return send_from_directory('static', path)
 
 # ========== API ENDPOINTS ==========
 @app.route('/health')
@@ -118,25 +59,9 @@ def health():
     return jsonify({
         'status': 'healthy',
         'app': 'Python & JS Hosting',
-        'version': '2.0.0',
+        'version': '1.0.0',
         'port': PORT,
-        'ip': HOST_IP,
-        'database': DB_AVAILABLE,
-        'projects': len(os.listdir(os.path.join(UPLOAD_FOLDER, 'projects')))
-    })
-
-@app.route('/api/status')
-def api_status():
-    """API durumu"""
-    return jsonify({
-        'success': True,
-        'data': {
-            'server': 'active',
-            'database': DB_AVAILABLE,
-            'port': PORT,
-            'ip': HOST_IP,
-            'uptime': time.time() - start_time if 'start_time' in globals() else 0
-        }
+        'ip': HOST_IP
     })
 
 @app.route('/api/projects')
@@ -149,51 +74,17 @@ def get_projects():
         for project_name in os.listdir(projects_dir):
             project_path = os.path.join(projects_dir, project_name)
             if os.path.isdir(project_path):
-                # Proje bilgilerini topla
                 running = project_name in DEPLOYMENTS and DEPLOYMENTS[project_name]['process'].poll() is None
                 
-                project_info = {
+                projects.append({
                     'id': project_name,
                     'name': project_name,
-                    'path': project_path,
-                    'created': os.path.getctime(project_path),
-                    'modified': os.path.getmtime(project_path),
                     'running': running,
                     'port': DEPLOYMENTS[project_name]['port'] if running else None,
-                    'url': f"http://{HOST_IP}:{DEPLOYMENTS[project_name]['port']}" if running else None,
-                    'command': DEPLOYMENTS[project_name]['command'] if running else None,
-                    'type': get_project_type(project_path),
-                    'size': get_project_size(project_path)
-                }
-                projects.append(project_info)
+                    'url': f"http://{HOST_IP}:{DEPLOYMENTS[project_name]['port']}" if running else None
+                })
     
     return jsonify({'success': True, 'data': projects})
-
-@app.route('/api/projects/<project_id>')
-def get_project(project_id):
-    """Tek bir projenin detaylarını getir"""
-    project_path = os.path.join(UPLOAD_FOLDER, 'projects', secure_filename(project_id))
-    
-    if not os.path.exists(project_path):
-        return jsonify({'success': False, 'error': 'Proje bulunamadı'}), 404
-    
-    running = project_id in DEPLOYMENTS and DEPLOYMENTS[project_id]['process'].poll() is None
-    
-    project_info = {
-        'id': project_id,
-        'name': project_id,
-        'path': project_path,
-        'created': os.path.getctime(project_path),
-        'modified': os.path.getmtime(project_path),
-        'running': running,
-        'port': DEPLOYMENTS[project_id]['port'] if running else None,
-        'url': f"http://{HOST_IP}:{DEPLOYMENTS[project_id]['port']}" if running else None,
-        'command': DEPLOYMENTS[project_id]['command'] if running else None,
-        'type': get_project_type(project_path),
-        'files': get_project_files_list(project_path)
-    }
-    
-    return jsonify({'success': True, 'data': project_info})
 
 @app.route('/api/upload', methods=['POST'])
 def upload_project():
@@ -232,17 +123,12 @@ def upload_project():
         # Geçici dosyayı sil
         os.remove(temp_path)
         
-        # Veritabanına kaydet (varsa)
-        if DB_AVAILABLE:
-            save_project_to_db(project_id, project_name, project_path)
-        
         return jsonify({
             'success': True, 
             'message': f'{project_name} projesi yüklendi',
             'data': {
                 'id': project_id,
-                'name': project_name,
-                'path': project_path
+                'name': project_name
             }
         })
         
@@ -273,17 +159,28 @@ def deploy_project(project_id):
         
         # Komutu hazırla
         if not command:
-            command = detect_start_command(project_path, port)
-        
-        if not command:
-            return jsonify({'success': False, 'error': 'Çalıştırılacak komut bulunamadı'}), 400
+            files = os.listdir(project_path)
+            if 'app.py' in files:
+                command = f'python app.py'
+            elif 'manage.py' in files:
+                command = f'python manage.py runserver 0.0.0.0:{port}'
+            elif 'server.js' in files:
+                command = f'node server.js'
+            elif 'index.js' in files:
+                command = f'node index.js'
+            elif any(f.endswith('.py') for f in files):
+                py_file = [f for f in files if f.endswith('.py')][0]
+                command = f'python {py_file}'
+            elif any(f.endswith('.js') for f in files):
+                js_file = [f for f in files if f.endswith('.js')][0]
+                command = f'node {js_file}'
+            else:
+                return jsonify({'success': False, 'error': 'Çalıştırılacak dosya bulunamadı'}), 400
         
         # Ortam değişkenlerini ayarla
         env = os.environ.copy()
         env['PORT'] = str(port)
         env['HOST'] = '0.0.0.0'
-        env['PROJECT_ID'] = project_id
-        env['PROJECT_PATH'] = project_path
         
         # Process'i başlat
         process = subprocess.Popen(
@@ -294,9 +191,7 @@ def deploy_project(project_id):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            env=env,
-            bufsize=1,
-            universal_newlines=True
+            env=env
         )
         
         DEPLOYMENTS[project_id] = {
@@ -304,9 +199,7 @@ def deploy_project(project_id):
             'port': port,
             'command': command,
             'start_time': time.time(),
-            'path': project_path,
-            'output': [],
-            'error': []
+            'output': []
         }
         
         # Çıktıları okumak için thread başlat
@@ -317,8 +210,7 @@ def deploy_project(project_id):
             'message': f'{project_id} başlatıldı',
             'data': {
                 'port': port,
-                'url': f'http://{HOST_IP}:{port}',
-                'command': command
+                'url': f'http://{HOST_IP}:{port}'
             }
         })
         
@@ -333,11 +225,8 @@ def stop_project(project_id):
     
     process = DEPLOYMENTS[project_id]['process']
     
-    # Process'i sonlandır
     if process.poll() is None:
         process.terminate()
-        
-        # 2 saniye bekle, hala çalışıyorsa zorla kapat
         time.sleep(2)
         if process.poll() is None:
             process.kill()
@@ -409,122 +298,17 @@ def list_files(project_id):
     
     files = []
     for root, dirs, filenames in os.walk(project_path):
-        for filename in filenames:
-            file_path = os.path.join(root, filename)
-            rel_path = os.path.relpath(file_path, project_path)
-            files.append({
-                'name': rel_path,
-                'size': os.path.getsize(file_path),
-                'modified': os.path.getmtime(file_path)
-            })
-    
-    return jsonify({'success': True, 'data': files})
-
-# ========== YARDIMCI FONKSİYONLAR ==========
-def get_project_type(project_path):
-    """Proje tipini belirle"""
-    files = os.listdir(project_path)
-    
-    if 'requirements.txt' in files:
-        return 'python'
-    elif 'package.json' in files:
-        return 'node'
-    elif any(f.endswith('.py') for f in files):
-        return 'python'
-    elif any(f.endswith('.js') for f in files):
-        return 'node'
-    else:
-        return 'unknown'
-
-def get_project_size(project_path):
-    """Proje boyutunu hesapla"""
-    total = 0
-    for root, dirs, files in os.walk(project_path):
-        for f in files:
-            fp = os.path.join(root, f)
-            total += os.path.getsize(fp)
-    return total
-
-def get_project_files_list(project_path, limit=20):
-    """Proje dosyalarının listesini al"""
-    files = []
-    for root, dirs, filenames in os.walk(project_path):
-        for filename in filenames[:limit]:
+        for filename in filenames[:20]:
             file_path = os.path.join(root, filename)
             rel_path = os.path.relpath(file_path, project_path)
             files.append({
                 'name': rel_path,
                 'size': os.path.getsize(file_path)
             })
-    return files
+    
+    return jsonify({'success': True, 'data': files})
 
-def detect_start_command(project_path, port):
-    """Başlangıç komutunu otomatik belirle"""
-    files = os.listdir(project_path)
-    
-    # Python projeleri
-    if 'requirements.txt' in files:
-        if 'manage.py' in files:
-            return f'python manage.py runserver 0.0.0.0:{port}'
-        elif 'app.py' in files:
-            return f'python app.py'
-        elif 'main.py' in files:
-            return f'python main.py'
-        elif 'bot.py' in files:
-            return f'python bot.py'
-    
-    # Node.js projeleri
-    if 'package.json' in files:
-        if 'server.js' in files:
-            return f'node server.js'
-        elif 'index.js' in files:
-            return f'node index.js'
-        elif 'app.js' in files:
-            return f'node app.js'
-        else:
-            return f'npm start'
-    
-    # Python dosyaları
-    py_files = [f for f in files if f.endswith('.py')]
-    if py_files:
-        return f'python {py_files[0]}'
-    
-    # JavaScript dosyaları
-    js_files = [f for f in files if f.endswith('.js')]
-    if js_files:
-        return f'node {js_files[0]}'
-    
-    return None
-
-def save_project_to_db(project_id, project_name, project_path):
-    """Projeyi veritabanına kaydet (opsiyonel)"""
-    if not DB_AVAILABLE:
-        return
-    
-    try:
-        connection = pymysql.connect(
-            host=DB_HOST,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            database=DB_NAME,
-            port=int(DB_PORT),
-            cursorclass=pymysql.cursors.DictCursor
-        )
-        
-        with connection:
-            with connection.cursor() as cursor:
-                sql = """
-                INSERT INTO projects (id, name, path, created_at) 
-                VALUES (%s, %s, %s, NOW())
-                ON DUPLICATE KEY UPDATE
-                name = VALUES(name),
-                path = VALUES(path)
-                """
-                cursor.execute(sql, (project_id, project_name, project_path))
-            connection.commit()
-    except Exception as e:
-        print(f"Veritabanı hatası: {e}")
-
+# ========== YARDIMCI FONKSİYONLAR ==========
 def read_output(project_id):
     """Proje çıktısını oku (arka planda)"""
     if project_id not in DEPLOYMENTS:
@@ -534,25 +318,15 @@ def read_output(project_id):
     
     while process.poll() is None:
         try:
-            # stdout oku
             if process.stdout:
                 line = process.stdout.readline()
                 if line:
                     DEPLOYMENTS[project_id]['output'].append(line)
                     print(f"[{project_id}] {line.strip()}")
-            
-            # stderr oku
-            if process.stderr:
-                line = process.stderr.readline()
-                if line:
-                    DEPLOYMENTS[project_id]['error'].append(line)
-                    DEPLOYMENTS[project_id]['output'].append(f"ERROR: {line}")
-                    
         except:
             pass
         
-        # Çok fazla çıktı birikmesini engelle
-        if len(DEPLOYMENTS[project_id]['output']) > 1000:
+        if len(DEPLOYMENTS[project_id]['output']) > 500:
             DEPLOYMENTS[project_id]['output'] = DEPLOYMENTS[project_id]['output'][-500:]
         
         time.sleep(0.1)
@@ -561,7 +335,6 @@ def read_output(project_id):
 def create_template_files():
     """Template dosyalarını otomatik oluştur"""
     
-    # index.html
     index_html = '''<!DOCTYPE html>
 <html lang="tr">
 <head>
@@ -571,60 +344,47 @@ def create_template_files():
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', monospace; background: #0a0a0a; color: #fff; }
-        .navbar { background: #1a1a1a; padding: 15px 30px; border-bottom: 3px solid #ff6b00; display: flex; justify-content: space-between; }
-        .logo { font-size: 24px; font-weight: bold; color: #ff6b00; }
-        .nav-links a { color: #fff; text-decoration: none; margin-left: 20px; }
-        .nav-links a:hover { color: #ff6b00; }
-        .container { max-width: 1400px; margin: 30px auto; padding: 0 20px; }
-        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
-        .stat-card { background: #1a1a1a; padding: 20px; border-left: 4px solid #ff6b00; }
-        .stat-value { font-size: 32px; font-weight: bold; color: #ff6b00; }
-        .stat-label { color: #888; margin-top: 5px; }
-        .projects { background: #1a1a1a; padding: 20px; }
-        .project-item { display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid #333; }
-        .project-item:hover { background: #252525; }
-        .status-badge { padding: 3px 10px; border-radius: 3px; font-size: 12px; }
-        .status-running { background: #00aa00; color: white; }
-        .status-stopped { background: #666; color: white; }
-        .btn { background: #ff6b00; color: black; border: none; padding: 8px 16px; cursor: pointer; margin: 0 5px; }
-        .btn:hover { background: #ff8533; }
-        .upload-section { background: #1a1a1a; padding: 20px; margin-top: 30px; }
+        .navbar { background: #1a1a1a; padding: 15px 30px; border-bottom: 3px solid #ff6b00; }
+        .logo { font-size: 24px; font-weight: bold; color: #ff6b00; text-align: center; }
+        .container { max-width: 1200px; margin: 30px auto; padding: 0 20px; }
+        .upload-section { background: #1a1a1a; padding: 20px; margin-bottom: 30px; border-left: 4px solid #ff6b00; }
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; margin-bottom: 5px; color: #ff6b00; }
         .form-group input, .form-group select { width: 100%; padding: 10px; background: #0a0a0a; border: 1px solid #333; color: white; }
         .form-group input:focus { border-color: #ff6b00; outline: none; }
-        .output-box { background: #0a0a0a; padding: 15px; font-family: monospace; height: 200px; overflow: auto; border: 1px solid #333; }
+        .btn { background: #ff6b00; color: black; border: none; padding: 8px 16px; cursor: pointer; margin: 0 5px; font-weight: bold; }
+        .btn:hover { background: #ff8533; }
+        .projects { background: #1a1a1a; padding: 20px; }
+        .project-item { display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid #333; align-items: center; }
+        .project-item:hover { background: #252525; }
+        .status-badge { padding: 3px 10px; border-radius: 3px; font-size: 12px; }
+        .status-running { background: #00aa00; color: white; }
+        .status-stopped { background: #666; color: white; }
+        .output-box { background: #0a0a0a; padding: 15px; font-family: monospace; height: 200px; overflow: auto; border: 1px solid #333; margin-top: 15px; }
         .footer { text-align: center; padding: 20px; color: #666; margin-top: 50px; }
+        .stats { display: flex; gap: 20px; margin-bottom: 20px; }
+        .stat-card { background: #1a1a1a; padding: 15px; flex: 1; text-align: center; border-left: 4px solid #ff6b00; }
+        .stat-value { font-size: 28px; font-weight: bold; color: #ff6b00; }
     </style>
 </head>
 <body>
     <div class="navbar">
         <div class="logo">🚀 PYTHON & JS HOSTING</div>
-        <div class="nav-links">
-            <a href="/">Ana Sayfa</a>
-            <a href="/projects">Projeler</a>
-            <a href="/console">Konsol</a>
-            <a href="/settings">Ayarlar</a>
-        </div>
     </div>
     
     <div class="container">
         <div class="stats">
             <div class="stat-card">
                 <div class="stat-value" id="projectCount">0</div>
-                <div class="stat-label">Toplam Proje</div>
+                <div>Toplam Proje</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="runningCount">0</div>
-                <div class="stat-label">Çalışan Proje</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="freePort">8000</div>
-                <div class="stat-label">Boş Port</div>
+                <div>Çalışan Proje</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="serverIp">{{ host_ip }}</div>
-                <div class="stat-label">Sunucu IP</div>
+                <div>Sunucu IP</div>
             </div>
         </div>
         
@@ -643,7 +403,7 @@ def create_template_files():
             </form>
         </div>
         
-        <div class="projects" style="margin-top: 30px;">
+        <div class="projects">
             <h2>📋 Projeler</h2>
             <div id="projectsList"></div>
         </div>
@@ -657,7 +417,7 @@ def create_template_files():
             </div>
             <button class="btn" onclick="startConsole()">Konsolu Başlat</button>
             <button class="btn" onclick="stopConsole()">Durdur</button>
-            <div id="output" class="output-box" style="margin-top: 15px;">Konsol çıktısı burada görünecek...</div>
+            <div id="output" class="output-box">Konsol çıktısı burada...</div>
             
             <div style="margin-top: 15px; display: flex; gap: 10px;">
                 <input type="text" id="commandInput" placeholder="komut girin..." style="flex: 1; padding: 10px; background: #0a0a0a; border: 1px solid #333; color: white;">
@@ -667,23 +427,12 @@ def create_template_files():
     </div>
     
     <div class="footer">
-        Python & JS Hosting v2.0 | Port: {{ port }} | Database: {{ '✅ Aktif' if db_status else '❌ Pasif' }}
+        Python & JS Hosting | Port: {{ port }} | Herkese Açık
     </div>
     
     <script>
-        const API = '';
         let consoleInterval = null;
         
-        // İstatistikleri güncelle
-        async function loadStats() {
-            const res = await fetch('/api/status');
-            const data = await res.json();
-            if (data.success) {
-                document.getElementById('freePort').innerText = data.data.port + 1;
-            }
-        }
-        
-        // Projeleri yükle
         async function loadProjects() {
             const res = await fetch('/api/projects');
             const data = await res.json();
@@ -700,10 +449,7 @@ def create_template_files():
                 
                 html += `
                     <div class="project-item">
-                        <div>
-                            <strong>${p.name}</strong><br>
-                            <small>${p.type || 'unknown'} | ${new Date(p.created * 1000).toLocaleString()}</small>
-                        </div>
+                        <div><strong>${p.name}</strong></div>
                         <div>
                             <span class="status-badge ${p.running ? 'status-running' : 'status-stopped'}">
                                 ${p.running ? 'ÇALIŞIYOR' : 'DURDU'}
@@ -716,10 +462,8 @@ def create_template_files():
                                 `<button class="btn" onclick="stopProject('${p.id}')">DURDUR</button>`
                             }
                             <button class="btn" onclick="deleteProject('${p.id}')">SİL</button>
-                            <button class="btn" onclick="showFiles('${p.id}')">DOSYALAR</button>
                         </div>
                     </div>
-                    <div id="files-${p.id}" style="display: none; background: #0a0a0a; padding: 10px;"></div>
                 `;
                 
                 if (p.running) {
@@ -733,7 +477,6 @@ def create_template_files():
             document.getElementById('runningCount').innerText = running;
         }
         
-        // Proje başlat
         window.deployProject = async (id) => {
             const cmd = prompt('Başlangıç komutu (boş bırak otomatik):');
             const res = await fetch(`/api/deploy/${id}`, {
@@ -746,42 +489,20 @@ def create_template_files():
             loadProjects();
         };
         
-        // Proje durdur
         window.stopProject = async (id) => {
             if (confirm('Projeyi durdurmak istediğinize emin misiniz?')) {
                 await fetch(`/api/stop/${id}`, {method: 'POST'});
                 loadProjects();
-                if (consoleInterval) stopConsole();
             }
         };
         
-        // Proje sil
         window.deleteProject = async (id) => {
-            if (confirm('Projeyi silmek istediğinize emin misiniz? Tüm dosyalar silinecek!')) {
+            if (confirm('Projeyi silmek istediğinize emin misiniz?')) {
                 await fetch(`/api/delete/${id}`, {method: 'DELETE'});
                 loadProjects();
-                if (consoleInterval) stopConsole();
             }
         };
         
-        // Dosyaları göster
-        window.showFiles = async (id) => {
-            const div = document.getElementById(`files-${id}`);
-            if (div.style.display === 'none') {
-                const res = await fetch(`/api/files/${id}`);
-                const data = await res.json();
-                if (data.success) {
-                    div.innerHTML = '<h4>Dosyalar:</h4>' + data.data.map(f => 
-                        `<div>📄 ${f.name} (${(f.size/1024).toFixed(2)} KB)</div>`
-                    ).join('');
-                    div.style.display = 'block';
-                }
-            } else {
-                div.style.display = 'none';
-            }
-        };
-        
-        // Konsol başlat
         window.startConsole = () => {
             const project = document.getElementById('projectSelect').value;
             if (!project) return alert('Proje seçin');
@@ -800,7 +521,6 @@ def create_template_files():
             consoleInterval = setInterval(getOutput, 2000);
         };
         
-        // Konsol durdur
         window.stopConsole = () => {
             if (consoleInterval) {
                 clearInterval(consoleInterval);
@@ -808,7 +528,6 @@ def create_template_files():
             }
         };
         
-        // Komut gönder
         window.sendCommand = async () => {
             const project = document.getElementById('projectSelect').value;
             const cmd = document.getElementById('commandInput').value;
@@ -822,7 +541,6 @@ def create_template_files():
             document.getElementById('commandInput').value = '';
         };
         
-        // Yükleme formu
         document.getElementById('uploadForm').onsubmit = async (e) => {
             e.preventDefault();
             const formData = new FormData();
@@ -835,52 +553,31 @@ def create_template_files():
             loadProjects();
         };
         
-        // Sayfa açılınca yükle
-        loadStats();
         loadProjects();
-        setInterval(loadStats, 5000);
     </script>
 </body>
 </html>'''
     
     with open('templates/index.html', 'w', encoding='utf-8') as f:
         f.write(index_html)
-    
-    # Diğer template'ler
-    with open('templates/dashboard.html', 'w') as f:
-        f.write('{% extends "index.html" %}{% block content %}Dashboard{% endblock %}')
-    
-    with open('templates/projects.html', 'w') as f:
-        f.write('{% extends "index.html" %}{% block content %}Projects{% endblock %}')
-    
-    with open('templates/console.html', 'w') as f:
-        f.write('{% extends "index.html" %}{% block content %}Console{% endblock %}')
-    
-    with open('templates/settings.html', 'w') as f:
-        f.write('{% extends "index.html" %}{% block content %}Settings{% endblock %}')
 
 # Template'leri oluştur
 create_template_files()
 
 # ========== WASMER İÇİN ==========
-# Bu satır WASMER'IN GÖRMESİ İÇİN ÇOK ÖNEMLİ
 application = app
 
-# Başlangıç zamanı
-start_time = time.time()
-
-# ========== ANA FONKSİYON ==========
+# ========== BAŞLAT ==========
 if __name__ == '__main__':
-    print("="*70)
-    print("🚀 PYTHON & JS HOSTING - TAM WEB SİTESİ")
-    print("="*70)
+    print("="*60)
+    print("🚀 PYTHON & JS HOSTING - GİRİŞSİZ")
+    print("="*60)
     print(f"Port: {PORT}")
     print(f"IP: {HOST_IP}")
     print(f"URL: http://{HOST_IP}:{PORT}")
-    print(f"Database: {'✅ Aktif' if DB_AVAILABLE else '❌ Pasif'}")
-    print("="*70)
-    print("Projeler klasörü:", os.path.join(UPLOAD_FOLDER, 'projects'))
-    print("Template'ler:", os.path.abspath('templates'))
-    print("="*70)
+    print("="*60)
+    print("📁 Projeler: uploads/projects/")
+    print("👤 Giriş: GEREK YOK - Herkese açık")
+    print("="*60)
     
     app.run(host=HOST, port=PORT, debug=False)
